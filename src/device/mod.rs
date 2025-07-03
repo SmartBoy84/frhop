@@ -6,10 +6,11 @@ mod writer;
 use std::{
     cell::Cell,
     io,
-    sync::{Arc, RwLock, mpsc},
+    sync::{Arc, mpsc},
 };
 
 use nusb::{Device, DeviceInfo, Interface, transfer::TransferError};
+use smol::lock::{Mutex, RwLock};
 use thiserror::Error;
 
 use crate::{device::query::QueryError, game::listing::Listing};
@@ -56,6 +57,6 @@ pub struct TinfoilDevice {
     interface: Interface, // tinfoil's interface - there's only one really...
     in_ep: u8,
     out_ep: u8,
-    recv_buff: Vec<u8>, // bit of interior mutability
-    listing: Arc<RwLock<Listing>>,
+    recv_buff: Mutex<Vec<u8>>, // bit of interior mutability
+    listing: Arc<smol::lock::RwLock<Listing>>,
 }

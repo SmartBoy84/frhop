@@ -1,7 +1,7 @@
 use std::{
     process::exit,
     sync::{
-        Arc, RwLock,
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -13,6 +13,7 @@ use smol::{
     Executor, Timer,
     channel::{Sender, unbounded},
     future,
+    lock::RwLock,
 };
 
 use crate::{device::TinfoilDevice, game::listing::Listing};
@@ -75,13 +76,11 @@ async fn async_main(executor: Arc<Executor<'_>>, _signal: Sender<()>) {
             }
         };
 
-        tasks.push(
-            executor.spawn(async {
-                if let Err(e) = tinfoil.start_talkin_buddy().await {
-                    eprintln!("{e:?}");
-                }
-            }),
-        );
+        tasks.push(executor.spawn(async {
+            if let Err(e) = tinfoil.start_talkin_buddy().await {
+                eprintln!("{e:?}");
+            }
+        }));
     }
 
     /*

@@ -2,7 +2,7 @@ use std::{
     cell::Cell,
     io::{self, Cursor},
     mem,
-    sync::{Arc, RwLock, RwLockReadGuard, mpsc},
+    sync::{Arc, mpsc},
 };
 
 use nusb::{
@@ -10,7 +10,10 @@ use nusb::{
     hotplug::HotplugEvent,
     transfer::{Direction, RequestBuffer},
 };
-use smol::stream::StreamExt;
+use smol::{
+    lock::{Mutex, RwLock, RwLockReadGuard},
+    stream::StreamExt,
+};
 use thiserror::Error;
 
 use crate::{
@@ -103,7 +106,7 @@ impl TinfoilDevice {
             interface,
             in_ep,
             out_ep,
-            recv_buff: Vec::with_capacity(mem::size_of::<CommandPacket>()), // this buff will grow as we receive other commands
+            recv_buff: Mutex::new(Vec::with_capacity(mem::size_of::<CommandPacket>())), // this buff will grow as we receive other commands
             listing,
         })
     }
@@ -112,13 +115,8 @@ impl TinfoilDevice {
         self.device_info.id()
     }
 
-    pub fn get_listing(&self) -> RwLockReadGuard<'_, Listing> {
-        if let Ok(l) = self.listing.read() {
-            l
-        } else {
-            self.listing.clear_poison(); // not that this'll ever happen
-            self.listing.read().unwrap()
-        }
+    pub async fn get_listing(&self) -> RwLockReadGuard<'_, Listing> {
+        self.listing.read().await
     }
 
     pub async fn read(
@@ -149,7 +147,7 @@ impl TinfoilDevice {
         // doesn't really make sense for the external user why recv takes a mutable reference - that's why I use refcell
 
         // recv_buff only taken here, so no issue with this
-        let mut recv_buff = self.get_buff();
+        let mut recv_buff = self.get_buff().await;
 
         recv_buff = self
             .read(recv_buff, mem::size_of::<CommandPacket>())
@@ -175,7 +173,7 @@ impl TinfoilDevice {
         let query = Query::from_payload(self, recv_buff, &payload)?;
         recv_buff = query.handle_query().await?; // all single-threaded baby! read mod.rs
 
-        self.return_buff(recv_buff); // place back the Vec
+        self.return_buff(recv_buff).await; // place back the Vec
         Ok(())
     }
 

@@ -19,12 +19,14 @@ Look here to optimise file transfer speeds
 
 impl TinfoilDevice {
     // these don't need to be hyper-optimised - for file writes, buff taken out at start not on every chunk write
-    pub fn get_buff(&self) -> Vec<u8> {
-        todo!()
+    pub async fn get_buff(&self) -> Vec<u8> {
+        let mut v = self.recv_buff.lock().await;
+        std::mem::take(&mut *v)
     }
 
-    pub fn return_buff(&self, v: Vec<u8>) -> Vec<u8> {
-        todo!()
+    pub async fn return_buff(&self, buff: Vec<u8>) {
+        let mut v = self.recv_buff.lock().await;
+        *v = buff;
     }
 
     /// transfer n bytes *exactly (err if not) from a reader -> tinfoil
