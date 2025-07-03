@@ -1,9 +1,9 @@
 use std::{process::exit, sync::Arc, thread};
 
 use smol::{
-    Executor, Timer,
-    channel::{Sender, unbounded},
-    future,
+    Executor,
+    channel::unbounded,
+    future::{self, race},
     lock::RwLock,
 };
 
@@ -22,32 +22,40 @@ fn calm_exit(e: &str) -> ! {
 fn main() {
     let ex = Arc::new(Executor::new());
     let (signal, shutdown) = unbounded::<()>();
-
-    let mut threads = (0..N_THREADS)
+    let shutdown = async move || {
+        let _ = shutdown.recv().await;
+        print!(".");
+    };
+    let threads = (0..N_THREADS)
         .map(|_| {
             let ex_clone = ex.clone();
             let shutdown = shutdown.clone();
 
-            thread::spawn(move || {
-                let _ = future::block_on(ex_clone.run(shutdown.recv()));
-            })
+            thread::spawn(move || future::block_on(ex_clone.run(shutdown())))
         })
         .collect::<Vec<_>>();
 
-    // ctrlc::set_handler(move || {
-    //     println!("Ctrl-c!");
-    //     let _ = signal.send_blocking(());
-    //     for thread in &threads {
-    //         thread.join().unwrap()
-    //     }
-    // })
-    // .expect("ctrl-c override failed");
+    ctrlc::set_handler(move || {
+        println!("shutting down connections");
+        // close down executor threads (including main)
+        for _ in 0..N_THREADS + 1 {
+            let _ = signal.send_blocking(()); // need to do this so the Device object is dropped (release ownership)
+        }
+    })
+    .expect("ctrl-c override failed");
 
     // main async task
-    future::block_on(async_main(ex, signal));
+    let ex_clone = ex.clone();
+    future::block_on(ex_clone.run(race(shutdown(), async_main(ex))));
+
+    // if we're here, cancel signal sent and tasks finished
+    println!("closed threads");
+    for thread in threads {
+        thread.join().unwrap()
+    }
 }
 
-async fn async_main(executor: Arc<Executor<'_>>, _signal: Sender<()>) {
+async fn async_main(executor: Arc<Executor<'_>>) {
     println!("Watching for device connection...");
 
     let test_dir = "nsp";
