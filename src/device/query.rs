@@ -118,7 +118,7 @@ impl Query<'_> {
             return Err(QueryError::NoIdInfoQuery)?;
         };
 
-        let listing = self.device.get_listing();
+        let listing = self.device.get_listing().await;
         let Some(game) = listing.get_game(t_id) else {
             return Err(QueryError::GameNotFound)?;
         };
@@ -151,7 +151,7 @@ impl Query<'_> {
             return Err(QueryError::NoIdInfoQuery)?;
         };
 
-        if let Some(game) = self.device.get_listing().get_game(t_id) {
+        if let Some(game) = self.device.get_listing().await.get_game(t_id) {
             self.write_str(&miniserde::json::to_string(&GameEntry::from(game)))
                 .await
         } else {
@@ -160,7 +160,7 @@ impl Query<'_> {
     }
 
     async fn handle_search(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
-        let s = self.device.get_listing().serialise();
+        let s = self.device.get_listing().await.serialise();
         self.write_str(&s).await
     }
 

@@ -1,13 +1,4 @@
-use std::{
-    process::exit,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    thread,
-    time::Duration,
-};
+use std::{process::exit, sync::Arc, thread};
 
 use smol::{
     Executor, Timer,
@@ -32,7 +23,7 @@ fn main() {
     let ex = Arc::new(Executor::new());
     let (signal, shutdown) = unbounded::<()>();
 
-    let mut threads = (0..4)
+    let mut threads = (0..N_THREADS)
         .map(|_| {
             let ex_clone = ex.clone();
             let shutdown = shutdown.clone();
@@ -53,7 +44,7 @@ fn main() {
     // .expect("ctrl-c override failed");
 
     // main async task
-    thread::spawn(move || future::block_on(async_main(ex, signal)));
+    future::block_on(async_main(ex, signal));
 }
 
 async fn async_main(executor: Arc<Executor<'_>>, _signal: Sender<()>) {
@@ -66,7 +57,7 @@ async fn async_main(executor: Arc<Executor<'_>>, _signal: Sender<()>) {
 
     let listing = Arc::new(RwLock::new(listing));
 
-    let mut tasks = Vec::with_capacity(1);
+    // let mut tasks = Vec::with_capacity(1);
 
     loop {
         let tinfoil = loop {
@@ -75,12 +66,14 @@ async fn async_main(executor: Arc<Executor<'_>>, _signal: Sender<()>) {
                 Err(e) => println!("Err: {e:?}"),
             }
         };
-
-        tasks.push(executor.spawn(async {
-            if let Err(e) = tinfoil.start_talkin_buddy().await {
-                eprintln!("{e:?}");
-            }
-        }));
+        println!("Connected!");
+        executor
+            .spawn(async {
+                if let Err(e) = tinfoil.start_talkin_buddy().await {
+                    eprintln!("{e:?}");
+                }
+            })
+            .detach(); // don't need the task
     }
 
     /*

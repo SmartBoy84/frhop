@@ -1,12 +1,7 @@
-use std::{
-    cell::Cell,
-    io::{self, Cursor},
-    mem,
-    sync::{Arc, mpsc},
-};
+use std::{io, mem, sync::Arc};
 
 use nusb::{
-    Device, DeviceId, DeviceInfo,
+    Device, DeviceInfo,
     hotplug::HotplugEvent,
     transfer::{Direction, RequestBuffer},
 };
@@ -18,8 +13,8 @@ use thiserror::Error;
 
 use crate::{
     device::{
-        DEFAULT_CMD, DEVICES, TinfoilDevice, TinfoilDeviceCommError, packet::CommandPacket,
-        query::Query,
+        CONNECTED_IDS, DEFAULT_CMD, DEVICES, TinfoilDevice, TinfoilDeviceCommError,
+        packet::CommandPacket, query::Query,
     },
     game::listing::Listing,
 };
@@ -34,19 +29,29 @@ pub enum TinfoilDeviceInitError {
     NoInterface,
 }
 
-async fn open_device(device: &DeviceInfo) -> Option<Device> {
+async fn open_device(device_info: &DeviceInfo) -> Option<Device> {
+    let mut connected_ids = CONNECTED_IDS.lock().await; // lock at the start to prevent weird races
+
+    if connected_ids.contains(&device_info.id()) {
+        return None;
+    }
+
     if DEVICES
         .iter()
-        .find(|d| d.prod == device.product_id() && d.vendor == device.vendor_id())
+        .find(|d| d.prod == device_info.product_id() && d.vendor == device_info.vendor_id())
         .is_none()
     {
         None
     } else {
         // usb errors aren't fatal
-        device
+        let device = device_info
             .open()
             .inspect_err(|e| eprintln!("Usb error: {e:?}"))
-            .ok()
+            .ok()?;
+
+        connected_ids.push(device_info.id());
+
+        Some(device)
     }
 }
 
@@ -109,10 +114,6 @@ impl TinfoilDevice {
             recv_buff: Mutex::new(Vec::with_capacity(mem::size_of::<CommandPacket>())), // this buff will grow as we receive other commands
             listing,
         })
-    }
-
-    pub fn get_id(&self) -> DeviceId {
-        self.device_info.id()
     }
 
     pub async fn get_listing(&self) -> RwLockReadGuard<'_, Listing> {

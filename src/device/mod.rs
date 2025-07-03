@@ -4,13 +4,12 @@ mod query;
 mod writer;
 
 use std::{
-    cell::Cell,
     io,
-    sync::{Arc, mpsc},
+    sync::{Arc, LazyLock},
 };
 
-use nusb::{Device, DeviceInfo, Interface, transfer::TransferError};
-use smol::lock::{Mutex, RwLock};
+use nusb::{transfer::TransferError, Device, DeviceId, DeviceInfo, Interface};
+use smol::lock::Mutex;
 use thiserror::Error;
 
 use crate::{device::query::QueryError, game::listing::Listing};
@@ -18,6 +17,9 @@ use crate::{device::query::QueryError, game::listing::Listing};
 const DEFAULT_CMD: u32 = 1; // tinfoil only every has 1
 const CHUNK_SIZE: usize = 0x400000; // ~4mb - good chunk size
 const FILE_CACHE_N: usize = 50; // keep n chunk sizes in memory to reduce disk reads
+
+// purely an internal variable so not difficult to reason about this
+static CONNECTED_IDS: LazyLock<Mutex<Vec<DeviceId>>> = LazyLock::new(|| Mutex::new(vec![]));
 
 #[derive(Error, Debug)]
 pub enum TinfoilDeviceCommError {
@@ -36,16 +38,16 @@ pub enum TinfoilDeviceCommError {
     PayloadTransferFailed(#[from] io::Error),
 }
 
-struct DeviceId {
+struct TinfoilId {
     vendor: u16,
     prod: u16,
 }
-const DEVICES: [DeviceId; 2] = [
-    DeviceId {
+const DEVICES: [TinfoilId; 2] = [
+    TinfoilId {
         vendor: 0x16C0,
         prod: 0x27E2,
     },
-    DeviceId {
+    TinfoilId {
         vendor: 0x057E,
         prod: 0x3000,
     },
