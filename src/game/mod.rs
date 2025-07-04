@@ -12,7 +12,7 @@ pub mod entry;
 mod info;
 pub mod nsp;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Game {
     pub info: GameInfo,
     path: PathBuf,

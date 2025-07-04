@@ -39,6 +39,8 @@ pub struct GameEntry {
 }
 
 // not super optimised clearly (using String + cloning), but it's only ever called for custom nsps
+// I'd prefer to provide a richer description of these custom nsps (or even nsps not in the titledb), but that would require decrypting the nsp
+// I am yet to implement that...
 impl GameEntry {
     // don't support rich descriptions of custom nsps - I think just this is sufficient
     pub fn plain_new(id: &str, size: u64, mtime: f64) -> Self {

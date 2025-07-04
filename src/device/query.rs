@@ -2,10 +2,11 @@
 info, queue, search, download
 */
 
-use smol::{
+use std::{
     fs::File,
-    io::{AsyncSeekExt, SeekFrom},
+    io::{Seek, SeekFrom},
 };
+
 use thiserror::Error;
 
 use crate::{
@@ -24,7 +25,7 @@ pub enum QueryError {
     #[error("no title id in info query")]
     NoIdInfoQuery,
     #[error("game not found")]
-    GameNotFound,
+    GameNotFound(String),
     #[error("bad download range")]
     BadRange,
     #[error("io error")]
@@ -81,7 +82,6 @@ impl<'a> Query<'a> {
 
 impl Query<'_> {
     async fn write_str(self, res: &str) -> Result<Vec<u8>, TinfoilDeviceCommError> {
-        println!("Writing: {res}");
         let b = res.as_bytes();
         self.device.write_from_reader(b, b.len(), self.buff).await
     }
@@ -120,7 +120,7 @@ impl Query<'_> {
 
         let listing = self.device.get_listing().await;
         let Some(game) = listing.get_game(t_id) else {
-            return Err(QueryError::GameNotFound)?;
+            return Err(QueryError::GameNotFound(t_id.to_string()))?;
         };
 
         let mut args = args.map(|v| v.parse::<u64>());
@@ -131,10 +131,9 @@ impl Query<'_> {
             return Err(QueryError::BadRange)?;
         };
 
-        let mut f = File::open(game.path()).await.map_err(Self::map_io)?;
+        let mut f = File::open(game.path()).map_err(Self::map_io)?;
 
         f.seek(SeekFrom::Start(start))
-            .await
             .map_err(Self::map_io)
             .unwrap();
 
@@ -153,7 +152,7 @@ impl Query<'_> {
             self.write_str(&miniserde::json::to_string(&GameEntry::try_from(game)?))
                 .await
         } else {
-            Err(QueryError::GameNotFound)?
+            Err(QueryError::GameNotFound(t_id.to_string()))?
         }
     }
 

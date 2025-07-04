@@ -8,6 +8,7 @@ bytemuck = { version = "1.23.1", features = ["derive"] }
 ctrlc = "3.4.7"
 easy-parallel = "3.3.1"
 miniserde = "0.1.42"
+notify = "8.1.0"
 nusb = "0.1.14"
 smol = "2.0.2"
 thiserror = "2.0.12"

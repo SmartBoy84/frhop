@@ -1,4 +1,4 @@
-use std::{sync::Arc, thread};
+use std::{process::exit, sync::Arc, thread};
 
 use smol::{
     Executor,
@@ -54,16 +54,32 @@ fn main() {
 }
 
 async fn async_main(executor: Arc<Executor<'_>>) {
-    println!("Waiting for device connection...");
+    let mut listing = Listing::new();
 
-    let test_dir = "nsp";
+    let mut args = std::env::args().skip(1);
+    if let Some(d) = args.next() {
+        listing.add(d).unwrap();
+    } else {
+        println!("Specify a [list of] directories or packages to serve");
+        exit(-1)
+    }
 
-    let listing = Listing::from_dir(test_dir).unwrap(); // todo: add a watcher to update
-    println!("{listing:?}");
-    // todo; add code in TinfoilDevice to reset when file added
+    for d in args {
+        listing.add(&d).unwrap();
+    }
+
+    if listing.map().is_empty() {
+        println!(
+            "Either all files specified are invalid packages or all of the directories are empty!"
+        );
+        exit(-1)
+    }
+
+    println!("\n{} nsps found", listing.map().len());
 
     let listing = Arc::new(RwLock::new(listing));
 
+    println!("Waiting for device connection...");
     loop {
         let tinfoil = loop {
             match TinfoilDevice::wait_new(listing.clone()).await {

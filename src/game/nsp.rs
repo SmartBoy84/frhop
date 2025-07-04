@@ -1,10 +1,9 @@
 // all this crap just to dynamically get version and title id 😭
-
 use core::str;
 use std::{
     fmt::Debug,
     fs,
-    io::{self, Read, Seek},
+    io::{self, Read},
     mem,
     path::PathBuf,
 };
@@ -64,7 +63,7 @@ pub struct NspHeader {
 
 pub struct Nsp {
     pub nsp_header: NspHeader,
-    pub cnmt: Cnmt,
+    // pub cnmt: Cnmt,
 }
 
 #[derive(Error, Debug)]
@@ -72,19 +71,13 @@ pub enum NspParsingError {
     #[error("File read error")]
     FileError(#[from] io::Error),
     #[error("Header missing/malformed")]
-    MalformedHeader(String),
+    MalformedHeader,
     #[error("non utf-8 encoding in string table")]
     BadString(String),
     #[error("missiing ticket")]
     NoTicket,
     #[error("missing cnmt")]
     NoCnmt,
-}
-
-impl Debug for Nsp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.cnmt.title_id)
-    }
 }
 
 impl Debug for File {
@@ -116,9 +109,7 @@ impl Nsp {
         let pfs0_header: PFS0Header = bytemuck::cast(pfs0_header);
 
         if &pfs0_header.tag != HEADER {
-            return Err(NspParsingError::MalformedHeader(
-                path.to_string_lossy().to_string(),
-            ));
+            return Err(NspParsingError::MalformedHeader);
         }
 
         // 2 - read file headers
@@ -159,38 +150,39 @@ impl Nsp {
 
         let files = Files::from_vec(files);
 
-        // 5 - get title id (redundant - use cnmt now)
-        // let Some(File { name: tik_id, .. }) = files.find_extension(".tik") else {
-        //     return Err(NspParsingError::NoTicket);
-        // };
-        // let title_id = tik_id[..TITLE_ID_WIDTH].to_uppercase().to_string();
-        // println!("TITIT: {title_id}");
-
-        // 5 - extract cnmt
-        let Some(File {
-            file_header: cnmt_header,
-            name,
-            ..
-        }) = files.find_extension(".cnmt.nca")
-        else {
-            return Err(NspParsingError::NoCnmt);
-        };
-        println!("{:?}", name);
-        let mut cnmt_buff = [0u8; size_of::<Cnmt>()];
-
-        println!("{cnmt_header:?}");
-
-        f.seek_relative(cnmt_header.offset as i64)?; // offset from end of header, which f file pointer already at, at this point
-        f.read_exact(&mut cnmt_buff)?;
-
-        let cnmt: Cnmt = bytemuck::cast(cnmt_buff); // little endian -> native endianess (eh, all modern computers are LE anyways...)
-
         let nsp_header = NspHeader {
             pfs0_header,
             str_table,
             files,
         };
 
-        Ok(Self { nsp_header, cnmt })
+        Ok(Self { nsp_header })
+    }
+
+    pub fn title_id(&self) -> Result<String, NspParsingError> {
+        // 5 - extract cnmt - AHHHH, IT'S FOCKIN' ENCRYPTED MATE
+        // let Some(File {
+        //     file_header: cnmt_header,
+        //     name,
+        //     ..
+        // }) = files.find_extension(".cnmt.nca")
+        // else {
+        //     return Err(NspParsingError::NoCnmt);
+        // };
+        // println!("{:?}", name);
+        // let mut cnmt_buff = [0u8; size_of::<Cnmt>()];
+
+        // f.seek_relative(cnmt_header.offset as i64)?; // offset from end of header, which f file pointer already at, at this point
+        // f.read_exact(&mut cnmt_buff)?;
+
+        // let cnmt: Cnmt = bytemuck::cast(cnmt_buff); // little endian -> native endianess (eh, all modern computers are LE anyways...)
+
+        // I would've preferred to parse the cnmt header, but its encrypted
+        // maybe in the future I could implement decrypting...
+        let Some(File { name: tik_id, .. }) = self.nsp_header.files.find_extension(".tik") else {
+            return Err(NspParsingError::NoTicket);
+        };
+        let title_id = tik_id[..TITLE_ID_WIDTH].to_uppercase().to_string();
+        Ok(title_id)
     }
 }

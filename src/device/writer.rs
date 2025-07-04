@@ -3,10 +3,9 @@ Unsafe *fully localised here
 It's to get performance past what's possible with libusb in python
 */
 
-use std::mem;
+use std::{io::{Cursor, Read}, mem};
 
 use bytemuck::bytes_of;
-use smol::io::{AsyncRead, AsyncReadExt, Cursor};
 
 use crate::device::{
     CHUNK_SIZE, DEFAULT_CMD, FILE_CACHE_N, TinfoilDevice, TinfoilDeviceCommError,
@@ -30,7 +29,7 @@ impl TinfoilDevice {
     }
 
     /// transfer n bytes *exactly (err if not) from a reader -> tinfoil
-    pub async fn write_from_reader<R: AsyncRead + Unpin>(
+    pub async fn write_from_reader<R: Read>(
         &self,
         mut reader: R,
         n: usize,
@@ -44,13 +43,13 @@ impl TinfoilDevice {
             buff.set_len(n);
         }
 
-        reader.read_exact(&mut buff[..]).await?;
+        reader.read_exact(&mut buff[..])?;
 
         self.write(buff).await
     }
 
     #[allow(unused)]
-    pub async fn write_from_vec<R: AsyncRead + Unpin>(
+    pub async fn write_from_vec<R: Read>(
         &self,
         payload: Vec<u8>,
         mut buff: Vec<u8>,
@@ -77,7 +76,7 @@ impl TinfoilDevice {
     }
 
     #[allow(unused)]
-    pub async fn write_chunked_no_caching<R: AsyncRead + Unpin>(
+    pub async fn write_chunked_no_caching<R: Read>(
         &self,
         mut reader: R,
         size: u64,
@@ -101,7 +100,7 @@ impl TinfoilDevice {
     }
 
     #[allow(unused)]
-    pub async fn write_chunked_with_caching<R: AsyncRead + Unpin>(
+    pub async fn write_chunked_with_caching<R: Read>(
         &self,
         mut reader: R,
         size: u64,
@@ -116,7 +115,7 @@ impl TinfoilDevice {
         }
 
         loop {
-            let n = reader.read(&mut cache_buff[..]).await?;
+            let n = reader.read(&mut cache_buff[..])?;
             if n == 0 {
                 break;
             }

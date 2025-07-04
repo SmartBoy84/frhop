@@ -3,22 +3,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::game::{
-    GameError,
-    nsp::{Cnmt, Nsp},
-};
+use crate::game::{GameError, nsp::Nsp};
 
 // kept separate to make serialisation easy
+// rename macro used to enforce that name is FIXED
 
-#[derive(Debug, miniserde::Serialize)]
+#[derive(Debug, miniserde::Serialize, PartialEq)]
 pub struct GameInfo {
-    title_id: String,
+    #[serde(rename = "id")]
+    id: String,
+    #[serde(rename = "name")]
     name: String,
+    #[serde(rename = "name")]
     size: u64,
+    #[serde(rename = "version")]
     version: String,
 }
 
-// just so I don't have to keep track of tupule order from return
+// just so I don't have to keep track of tuple order from return
 #[derive(Debug)]
 struct Extractor {
     title_id: String,
@@ -34,15 +36,19 @@ impl GameInfo {
             .and_then(|f| f.to_str())
             .ok_or(GameError::MalformedName)?;
 
-        let Extractor { title_id, version } = match f_base.rsplit_once('.') {
-            // Some((_, "nsp")) | None => Extractor::from_nsp(&p), // .nsp OR default for no extension
-            _ => Extractor::from_name(f_base, &p),              // unsupported extension
-        }?;
+        let mut ex = Extractor::from_name(f_base, &p); // try to extract from filename first
+        if let Err(e) = ex {
+            println!(
+                "Warning; failed to extract info from name [{f_base}]: {e:?} - trying to extract from binary..."
+            );
+            ex = Extractor::from_nsp(&p); // fallback option
+        }
+        let Extractor { title_id, version } = ex?;
 
         let metadata = fs::metadata(path)?;
 
         Ok(GameInfo {
-            title_id,
+            id: title_id,
             size: metadata.len(),
             version,
             name: f_base.to_string(),
@@ -50,7 +56,7 @@ impl GameInfo {
     }
 
     pub fn title_id(&self) -> &str {
-        &self.title_id
+        &self.id
     }
 
     pub fn size(&self) -> u64 {
@@ -93,19 +99,14 @@ impl Extractor {
     }
 
     fn from_nsp(path: &PathBuf) -> Result<Self, GameError> {
-        let Nsp {
-            cnmt: Cnmt {
-                title_id, version, ..
-            },
-            ..
-        } = Nsp::from_file(path)?;
-        println!("Using nsp extraction for {path:?}");
+        // Right now, this is the fall back - all I can get is the titleid without decryption
+        let title_id = Nsp::from_file(path)?.title_id()?;
+
         let ex = Extractor {
-            title_id: format!("{:x}", title_id), // internally u64, sent as hex
-            version: version.to_string(),
+            title_id: title_id,       // internally u64, sent as hex
+            version: "0".to_string(), // unfortunately no parsing
         };
 
-        println!("{ex:?}");
         Ok(ex)
     }
 }
