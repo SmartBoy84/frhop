@@ -11,13 +11,9 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::{
-    device::{
-        CONNECTED_IDS, DEFAULT_CMD, DEVICES, TinfoilDevice, TinfoilDeviceCommError,
-        packet::CommandPacket, query::Query,
-    },
-    game::listing::Listing,
-};
+use crate::{device::{
+    packet::CommandPacket, query::Query, TinfoilDevice, TinfoilDeviceCommError, CONNECTED_IDS, DEFAULT_CMD, DEVICES
+}, listing::Listing};
 
 #[derive(Error, Debug)]
 pub enum TinfoilDeviceInitError {

@@ -3,10 +3,10 @@ Unsafe *fully localised here
 It's to get performance past what's possible with libusb in python
 */
 
-use std::{io::Read, mem};
+use std::mem;
 
 use bytemuck::bytes_of;
-use std::io::Cursor;
+use smol::io::{AsyncRead, AsyncReadExt, Cursor};
 
 use crate::device::{
     CHUNK_SIZE, DEFAULT_CMD, FILE_CACHE_N, TinfoilDevice, TinfoilDeviceCommError,
@@ -30,7 +30,7 @@ impl TinfoilDevice {
     }
 
     /// transfer n bytes *exactly (err if not) from a reader -> tinfoil
-    pub async fn write_from_reader<R: Read>(
+    pub async fn write_from_reader<R: AsyncRead + Unpin>(
         &self,
         mut reader: R,
         n: usize,
@@ -44,13 +44,13 @@ impl TinfoilDevice {
             buff.set_len(n);
         }
 
-        reader.read_exact(&mut buff[..])?;
+        reader.read_exact(&mut buff[..]).await?;
 
         self.write(buff).await
     }
 
     #[allow(unused)]
-    pub async fn write_from_vec(
+    pub async fn write_from_vec<R: AsyncRead + Unpin>(
         &self,
         payload: Vec<u8>,
         mut buff: Vec<u8>,
@@ -77,7 +77,7 @@ impl TinfoilDevice {
     }
 
     #[allow(unused)]
-    pub async fn write_chunked_no_caching<R: Read>(
+    pub async fn write_chunked_no_caching<R: AsyncRead + Unpin>(
         &self,
         mut reader: R,
         size: u64,
@@ -101,14 +101,13 @@ impl TinfoilDevice {
     }
 
     #[allow(unused)]
-    pub async fn write_chunked_with_caching<R: Read>(
+    pub async fn write_chunked_with_caching<R: AsyncRead + Unpin>(
         &self,
         mut reader: R,
         size: u64,
         mut buff: Vec<u8>,
     ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
         /* Tried to make this as fast as possible with caching to minimise file reads but doesn't make that big a difference...*/
-
         let size = (FILE_CACHE_N * CHUNK_SIZE).min(size as usize);
 
         let mut cache_buff = Vec::with_capacity(size); // allocate a file cache
@@ -117,7 +116,7 @@ impl TinfoilDevice {
         }
 
         loop {
-            let n = reader.read(&mut cache_buff[..]).unwrap();
+            let n = reader.read(&mut cache_buff[..]).await?;
             if n == 0 {
                 break;
             }

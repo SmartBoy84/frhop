@@ -38,13 +38,16 @@ pub struct GameEntry {
     mtime: f64,
 }
 
+// not super optimised clearly (using String + cloning), but it's only ever called for custom nsps
 impl GameEntry {
     // don't support rich descriptions of custom nsps - I think just this is sufficient
-    pub fn plain_new(id: String, size: u64, mtime: f64) -> Self {
+    pub fn plain_new(id: &str, size: u64, mtime: f64) -> Self {
+        let id = id.to_string();
         Self {
             updateId: Some(id.clone()),
             id,
             size,
+            mtime,
             ..Default::default()
         }
     }

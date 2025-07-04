@@ -2,11 +2,10 @@
 info, queue, search, download
 */
 
-use std::{
-    fs,
-    io::{self, Seek, SeekFrom},
+use smol::{
+    fs::File,
+    io::{AsyncSeekExt, SeekFrom},
 };
-
 use thiserror::Error;
 
 use crate::{
@@ -17,7 +16,7 @@ use crate::{
 #[derive(Error, Debug)]
 pub enum QueryError {
     #[error("malformed cmd")]
-    MalformedCmd(String),
+    UnsupportedCmd(String),
     #[error("unsupported endpoint")]
     UnsupportedEndpoint(String),
     #[error("unsupported req type")]
@@ -29,7 +28,7 @@ pub enum QueryError {
     #[error("bad download range")]
     BadRange,
     #[error("io error")]
-    IoError(#[from] io::Error),
+    IoError(#[from] smol::io::Error),
 }
 
 // &str's lifetime is shorter than TinfoilDevice but Query doesn't care about TinfoilDevice longer than it cares about the &str so it works
@@ -50,7 +49,7 @@ impl<'a> Query<'a> {
     ) -> Result<Self, QueryError> {
         let mut args = payload.split('/');
         if args.next() != Some("") {
-            return Err(QueryError::MalformedCmd(payload.to_string()).into());
+            return Err(QueryError::UnsupportedCmd(payload.to_string()).into());
             // be somewhat strict; tinfoil over usb will always have '/' at start
         }
 
@@ -60,7 +59,7 @@ impl<'a> Query<'a> {
             args.next(),
             args.next(), // may not exist
         ) else {
-            return Err(QueryError::MalformedCmd(payload.to_string()).into());
+            return Err(QueryError::UnsupportedCmd(payload.to_string()).into());
         };
 
         Ok(Self {
@@ -82,12 +81,13 @@ impl<'a> Query<'a> {
 
 impl Query<'_> {
     async fn write_str(self, res: &str) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+        println!("Writing: {res}");
         let b = res.as_bytes();
         self.device.write_from_reader(b, b.len(), self.buff).await
     }
 
     #[inline] // tho compiler will prob already inline it
-    fn map_io(e: io::Error) -> QueryError {
+    fn map_io(e: smol::io::Error) -> QueryError {
         QueryError::IoError(e)
     }
 }
@@ -131,12 +131,10 @@ impl Query<'_> {
             return Err(QueryError::BadRange)?;
         };
 
-        let mut f = fs::OpenOptions::new()
-            .read(true)
-            .open(game.path())
-            .map_err(Self::map_io)?;
+        let mut f = File::open(game.path()).await.map_err(Self::map_io)?;
 
         f.seek(SeekFrom::Start(start))
+            .await
             .map_err(Self::map_io)
             .unwrap();
 
@@ -152,7 +150,7 @@ impl Query<'_> {
         };
 
         if let Some(game) = self.device.get_listing().await.get_game(t_id) {
-            self.write_str(&miniserde::json::to_string(&GameEntry::from(game)))
+            self.write_str(&miniserde::json::to_string(&GameEntry::try_from(game)?))
                 .await
         } else {
             Err(QueryError::GameNotFound)?

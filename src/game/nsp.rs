@@ -26,11 +26,11 @@ pub struct PFS0Header {
 
 #[derive(Pod, Clone, Copy, Zeroable, Debug)]
 #[repr(C)]
-pub struct FileHeader {
+pub struct FileEntry {
     offset: u64,
     size: u64,
-    name_offset: u32,
-    _padding: u32,
+    s_table_off: u32,
+    _reserved: u32,
 }
 
 // #[repr(C)]
@@ -42,7 +42,7 @@ pub struct FileHeader {
 
 pub struct File {
     name: String,
-    file_header: FileHeader,
+    file_header: FileEntry,
 }
 
 pub struct Files(Vec<File>);
@@ -63,17 +63,12 @@ pub struct NspHeader {
 }
 
 pub struct Nsp {
-    pub name: String,
-    pub path: PathBuf,
-    pub file_size: u64,
     pub nsp_header: NspHeader,
     pub cnmt: Cnmt,
 }
 
 #[derive(Error, Debug)]
 pub enum NspParsingError {
-    #[error("Bad filename")]
-    BadName,
     #[error("File read error")]
     FileError(#[from] io::Error),
     #[error("Header missing/malformed")]
@@ -88,7 +83,7 @@ pub enum NspParsingError {
 
 impl Debug for Nsp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}: {}", self.path.to_string_lossy(), self.cnmt.title_id)
+        writeln!(f, "{}", self.cnmt.title_id)
     }
 }
 
@@ -103,20 +98,13 @@ impl Files {
         Self(files)
     }
     fn find_extension(&self, extension: &str) -> Option<&File> {
-        self.0.iter().find(|f| f.name.ends_with(".tik"))
+        self.0.iter().find(|f| f.name.ends_with(extension))
     }
 }
 
 impl Nsp {
-    pub fn from_file(path: PathBuf) -> Result<Self, NspParsingError> {
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or(NspParsingError::BadName)?
-            .to_string();
-
-        let file_size = std::fs::metadata(&path)?.len();
-
+    pub fn from_file(path: &PathBuf) -> Result<Self, NspParsingError> {
+        // the following process is sequential - the f cursor is automatically advanced behind the scenes
         let mut f = fs::OpenOptions::new().read(true).open(&path)?;
 
         // honestly; all this just to get filename + id
@@ -136,9 +124,9 @@ impl Nsp {
         // 2 - read file headers
         let mut files = Vec::with_capacity(pfs0_header.n_files as usize);
         for _i in 0..pfs0_header.n_files {
-            let mut file_header = [0u8; size_of::<FileHeader>()];
+            let mut file_header = [0u8; size_of::<FileEntry>()];
             f.read_exact(&mut file_header)?;
-            let file_header: FileHeader = bytemuck::cast(file_header);
+            let file_header: FileEntry = bytemuck::cast(file_header);
             files.push(File {
                 name: String::new(),
                 file_header,
@@ -151,11 +139,11 @@ impl Nsp {
 
         // 4 - get filenames
         for i in 0..files.len() {
-            let str_data = &str_table[files[i].file_header.name_offset as usize
+            let str_data = &str_table[files[i].file_header.s_table_off as usize
                 ..if i == pfs0_header.n_files as usize - 1 {
                     str_table.len()
                 } else {
-                    files[i + 1].file_header.name_offset as usize
+                    files[i + 1].file_header.s_table_off as usize
                 }];
             match std::str::from_utf8(str_data) {
                 Ok(s) => files[i]
@@ -168,34 +156,34 @@ impl Nsp {
                 }
             }
         }
-        println!("{files:?}");
 
         let files = Files::from_vec(files);
 
         // 5 - get title id (redundant - use cnmt now)
-        let Some(File { name: tik_id, .. }) = files.find_extension(".tik") else {
-            return Err(NspParsingError::NoTicket);
-        };
-        let title_id = tik_id[..TITLE_ID_WIDTH].to_uppercase().to_string();
+        // let Some(File { name: tik_id, .. }) = files.find_extension(".tik") else {
+        //     return Err(NspParsingError::NoTicket);
+        // };
+        // let title_id = tik_id[..TITLE_ID_WIDTH].to_uppercase().to_string();
+        // println!("TITIT: {title_id}");
 
         // 5 - extract cnmt
         let Some(File {
             file_header: cnmt_header,
+            name,
             ..
         }) = files.find_extension(".cnmt.nca")
         else {
             return Err(NspParsingError::NoCnmt);
         };
+        println!("{:?}", name);
         let mut cnmt_buff = [0u8; size_of::<Cnmt>()];
+
+        println!("{cnmt_header:?}");
 
         f.seek_relative(cnmt_header.offset as i64)?; // offset from end of header, which f file pointer already at, at this point
         f.read_exact(&mut cnmt_buff)?;
 
-        let cnmt: Cnmt = bytemuck::cast(cnmt_buff);
-        println!(
-            "cnmt size: {}, cnmt offset: {}, cnmt: {cnmt:?}",
-            cnmt_header.size, cnmt_header.offset
-        );
+        let cnmt: Cnmt = bytemuck::cast(cnmt_buff); // little endian -> native endianess (eh, all modern computers are LE anyways...)
 
         let nsp_header = NspHeader {
             pfs0_header,
@@ -203,12 +191,6 @@ impl Nsp {
             files,
         };
 
-        Ok(Self {
-            name,
-            file_size,
-            path,
-            nsp_header,
-            cnmt,
-        })
+        Ok(Self { nsp_header, cnmt })
     }
 }

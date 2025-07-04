@@ -1,4 +1,4 @@
-use std::{process::exit, sync::Arc, thread};
+use std::{sync::Arc, thread};
 
 use smol::{
     Executor,
@@ -7,17 +7,13 @@ use smol::{
     lock::RwLock,
 };
 
-use crate::{device::TinfoilDevice, game::listing::Listing};
+use crate::{device::TinfoilDevice, listing::Listing};
 
 mod device;
 mod game;
+mod listing;
 
-const N_THREADS: usize = 10;
-
-fn calm_exit(e: &str) -> ! {
-    println!("{e}");
-    exit(-1)
-}
+const N_THREADS: usize = 4; // turn this up to increase thread count, but come on >4 is overkill for this
 
 fn main() {
     let ex = Arc::new(Executor::new());
@@ -35,6 +31,8 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
+    // it's not like tinfoil supports refreshing when its reconnected
+    // all this is because on windows device ownership isn't released if we just halt the program
     ctrlc::set_handler(move || {
         println!("shutting down connections");
         // close down executor threads (including main)
@@ -49,36 +47,35 @@ fn main() {
     future::block_on(ex_clone.run(race(shutdown(), async_main(ex))));
 
     // if we're here, cancel signal sent and tasks finished
-    println!("closed threads");
     for thread in threads {
         thread.join().unwrap()
     }
+    println!("threads closed");
 }
 
 async fn async_main(executor: Arc<Executor<'_>>) {
-    println!("Watching for device connection...");
+    println!("Waiting for device connection...");
 
     let test_dir = "nsp";
 
     let listing = Listing::from_dir(test_dir).unwrap(); // todo: add a watcher to update
+    println!("{listing:?}");
     // todo; add code in TinfoilDevice to reset when file added
 
     let listing = Arc::new(RwLock::new(listing));
-
-    // let mut tasks = Vec::with_capacity(1);
 
     loop {
         let tinfoil = loop {
             match TinfoilDevice::wait_new(listing.clone()).await {
                 Ok(device) => break device,
-                Err(e) => println!("Err: {e:?}"),
+                Err(e) => println!("Error connecting: {e:?}"),
             }
         };
         println!("Connected!");
         executor
             .spawn(async {
                 if let Err(e) = tinfoil.start_talkin_buddy().await {
-                    eprintln!("{e:?}");
+                    eprintln!("{e:?} (did you disconnect?)");
                 }
             })
             .detach(); // don't need the task
