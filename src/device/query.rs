@@ -16,27 +16,27 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum QueryErrorKind {
-    #[error("malformed cmd")]
+    #[error("unsupported cmd: {0}")]
     UnsupportedCmd(String),
-    #[error("unsupported endpoint")]
+    #[error("unsupported endpoint: {0}")]
     UnsupportedEndpoint(String),
-    #[error("unsupported req type")]
+    #[error("unsupported req type: {0}")]
     UnsupportedReqType(String),
     #[error("no title id in info query")]
     NoIdInfoQuery,
-    #[error("game not found")]
+    #[error("game not found: {0}")]
     GameNotFound(String),
     #[error("bad download range")]
     BadRange,
-    #[error("failed to read file")]
+    #[error("failed to read file: {0}")]
     FileRead(#[from] io::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum QueryError {
-    #[error("bad query")]
+    #[error("bad query: {}", .0.0)]
     BadQuery((QueryErrorKind, Vec<u8>)),
-    #[error("tinfoil comm erorr")]
+    #[error("{0}")]
     CommError(#[from] TinfoilDeviceCommError),
 }
 

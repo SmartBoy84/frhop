@@ -12,7 +12,7 @@ use nusb::{Device, DeviceId, DeviceInfo, Interface, transfer::TransferError};
 use smol::lock::Mutex;
 use thiserror::Error;
 
-use crate::{device::query::QueryError, listing::Listing};
+use crate::listing::Listing;
 
 const DEFAULT_CMD: u32 = 1; // tinfoil only every has 1
 const CHUNK_SIZE: usize = 0x400000; // ~4mb - good chunk size

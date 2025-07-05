@@ -26,7 +26,11 @@ impl TinfoilDevice {
         std::mem::take(&mut *v)
     }
 
-    pub async fn write_str(&self, res: &str, buff: Vec<u8>) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    pub async fn write_str(
+        &self,
+        res: &str,
+        buff: Vec<u8>,
+    ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
         let b = res.as_bytes();
         self.write_from_reader(b, b.len(), buff).await
     }
@@ -131,14 +135,12 @@ impl TinfoilDevice {
             for _ in 0..n / CHUNK_SIZE {
                 buff = self
                     .write_from_reader(&mut cursor, CHUNK_SIZE, buff)
-                    .await
-                    .unwrap();
+                    .await?;
             }
             if n % CHUNK_SIZE > 0 {
                 buff = self
                     .write_from_reader(&mut cursor, n % CHUNK_SIZE, buff)
-                    .await
-                    .unwrap();
+                    .await?;
                 break;
             }
         }

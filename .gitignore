@@ -1,6 +1,9 @@
-nsp
-target
-win_hash.txt
-Cargo.lock
+# Mac
 .DS_Store
-*.md
+
+# Cargo + Zig-build (cache dir in target/zig-cache)
+target
+Cargo.lock
+
+# Testing
+nsp
