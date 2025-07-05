@@ -91,7 +91,7 @@ async fn async_main(executor: Arc<Executor<'_>>) {
         executor
             .spawn(async {
                 if let Err(e) = tinfoil.start_talkin_buddy().await {
-                    eprintln!("{e:?} (did you disconnect?)");
+                    eprintln!("{e:?} (switch disconnected?)");
                 }
             })
             .detach(); // don't need the task

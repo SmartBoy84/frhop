@@ -42,6 +42,7 @@ for TARGET in "${TARGETS[@]}"; do
     # add .exe for winodows
     if [[ "$TARGET" == *windows* ]]; then
         BIN_PATH="${BIN_PATH}.exe"
+        OUT_NAME="${OUT_NAME}.exe"
     fi
 
     if [[ -f "$BIN_PATH" ]]; then

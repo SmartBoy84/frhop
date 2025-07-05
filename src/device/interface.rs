@@ -1,4 +1,4 @@
-use std::{io, mem, sync::Arc};
+use std::{io, mem, sync::Arc, time::Duration};
 
 use miniserde::json;
 use nusb::{
@@ -7,6 +7,7 @@ use nusb::{
     transfer::{Direction, RequestBuffer},
 };
 use smol::{
+    Timer,
     lock::{Mutex, RwLock, RwLockReadGuard},
     stream::StreamExt,
 };
@@ -23,7 +24,7 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum TinfoilDeviceInitError {
-    #[error("io error")]
+    #[error("io error: {0}")]
     Io(#[from] io::Error),
     #[error("endpoint not found")]
     EpNotFound,
@@ -87,7 +88,14 @@ impl TinfoilDevice {
         // tinfoil's usb interface - one config, 2 interfaces but still try to be dynamic...
         // device.set_configuration(1)?;
 
-        let interface = device.claim_interface(0)?; // why are there 2 interfaces anyways...
+        let interface = match device.claim_interface(0) {
+            Ok(i) => i,
+            Err(_) => {
+                // for windows, interfaces might only be available after a small delay
+                Timer::after(Duration::from_millis(500)).await;
+                device.claim_interface(0)?
+            }
+        }; // why are there 2 interfaces anyways...
 
         let a_set = interface
             .descriptors()
