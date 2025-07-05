@@ -160,6 +160,10 @@ impl TinfoilDevice {
         // recv_buff only taken here, so no issue with this
         let mut recv_buff = self.get_buff().await;
 
+        /*
+        Sphaira waits for USB list rather than request queue itself
+        */
+
         recv_buff = self
             .read(recv_buff, mem::size_of::<CommandPacket>())
             .await?;

@@ -9,13 +9,14 @@ Tiny utility to serve Switch archives over [Tinfoil](https://tinfoil.io/)'s USB 
 - Only `nut`'s USB functionality implemented 
 - `nut` requires filenames to contain TitleID, `frhop` can extract from `nsp`
 - Couple of other QoL improvements that should fix hangs `USB` users may have experienced with `nut`
+- All switch archive formats are supported (`nsp`, `xci`, `nsz` etc)
 
 # Limitations 
 Tinfoil's USB interface can be a bit finicky at times, here are the most common issues. Note, everything here affects `nut.py` as well.  
 - USB connection may not be restored if you unplug and replug the Switch with Tinfoil opened - restart Tinfoil or put the Switch to sleep and wake again
-- Tinfoil only gets NSP listing at the start, to update you must close/re-open the app
+- Tinfoil only gets package listing at the start, to update you must close/re-open the app - or get the file from `File browser > usb:/`
 - Tinfoil is (tragically) one-threaded - concurrent downloads not possible
-- Once you connect USB, Tinfoil will freeze for 1-2 seconds as it parses the NSP headers to extract info
+- Once you connect USB, Tinfoil will freeze for 1-2 seconds as it parses the package headers to extract info
 
 # USB driver
 Depending on your platform, driver setup may be required.  
@@ -45,7 +46,7 @@ Will need to configure `udev` rules. Follow [`these`](https://docs.rs/nusb/lates
 > - ~~Make multi-threaded~~
 > - ~~Move Listing out of TinfoilDevice~~
 > - ~~Make QueryError non-fatal (*difficult -> I need to get a way to propagate out Vec<u8> when using '?')~~
-> - ~~Dynamically get nsp~~
+> - ~~Dynamically get package~~
 > - ~~Drop the device correctly \(i.e., all you have to do is override ctrl+c) on ctrl+c else you'll get erros when restarting program~~
 > - ~~ALSO, once I figure out a neat way to get Vec\<u8> back to Interface on QueryError, I can appropriately report error to the switch~~
 >     - E.g., if user accidently goes onto UsbFS, switch freezes until response is returned -> program doesn't support it, so I should return an empty \[JSON] response
