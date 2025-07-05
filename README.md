@@ -5,17 +5,17 @@ Tiny utility to serve Switch archives over [Tinfoil](https://tinfoil.io/)'s USB 
 
 # `frhop` vs `nut`
 - Speed-wise it's slightly faster; ~10% faster.  
-- Pure rust + completely static - no fiddling with `pip` + all platforms supports  
+- Pure rust + completely static - no fiddling with `pip` on non-Windows platforms
 - Only `nut`'s USB functionality implemented 
 - `nut` requires filenames to contain TitleID, `frhop` can extract from `nsp`
 - Couple of other QoL improvements that should fix hangs `USB` users may have experienced with `nut`
 
 # Limitations 
-Tinfoil's USB interface can be a bit finicky at times, here are the most common ones. Note, everything here affects `nut.py` as well.  
+Tinfoil's USB interface can be a bit finicky at times, here are the most common issues. Note, everything here affects `nut.py` as well.  
 - USB connection may not be restored if you unplug and replug the Switch with Tinfoil opened - restart Tinfoil or put the Switch to sleep and wake again
 - Tinfoil only gets NSP listing at the start, to update you must close/re-open the app
 - Tinfoil is (tragically) one-threaded - concurrent downloads not possible
-- Once you connect USB, Tinfoil will freeze for 1-2 seconds as it parses the NSP headers to extract key info
+- Once you connect USB, Tinfoil will freeze for 1-2 seconds as it parses the NSP headers to extract info
 
 # USB driver
 Depending on your platform, driver setup may be required.  
@@ -30,9 +30,10 @@ Windows users must install the `WinUSB` driver using [`Zadig`](https://zadig.ake
 2. Open `Tinfoil`, and plug in the switch
 3. `Options > List all devices`
 4. Select `Tinfoil (Interface 0)` from the dropdown
-5. Select the WinUSB (v`...`) driver using the arrow keys, and press install   
+5. Select the WinUSB (v...) driver using the arrow keys, and press install   
 
-![Zadig interface](res/zadig.png)
+<img src="res/zadig.png" width="400" alt="zadig interface example">
+
 ## Linux
 Will need to configure `udev` rules. Follow [`these`](https://docs.rs/nusb/latest/nusb/#linux) instructions. 
 # Building
@@ -48,4 +49,4 @@ Will need to configure `udev` rules. Follow [`these`](https://docs.rs/nusb/lates
 > - ~~Drop the device correctly \(i.e., all you have to do is override ctrl+c) on ctrl+c else you'll get erros when restarting program~~
 > - ~~ALSO, once I figure out a neat way to get Vec\<u8> back to Interface on QueryError, I can appropriately report error to the switch~~
 >     - E.g., if user accidently goes onto UsbFS, switch freezes until response is returned -> program doesn't support it, so I should return an empty \[JSON] response
-. - Add a file watcher - more difficult than it seems
+> - Add a file watcher - more difficult than it seems
