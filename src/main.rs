@@ -7,7 +7,10 @@ use smol::{
     lock::RwLock,
 };
 
-use crate::{device::TinfoilDevice, listing::Listing};
+use crate::{
+    device::{UsbClient, interface::SwitchInterface},
+    listing::Listing,
+};
 
 mod device;
 mod game;
@@ -56,9 +59,17 @@ fn main() {
 async fn async_main(executor: Arc<Executor<'_>>) {
     let mut listing = Listing::new();
 
+    let mut client = Default::default();
+
     let mut args = std::env::args().skip(1);
     if let Some(d) = args.next() {
-        listing.add(d).unwrap();
+        if let Some(("", t)) = d.split_once("-")
+            && let Ok(c) = UsbClient::try_from(t)
+        {
+            client = c;
+        } else {
+            listing.add(d).unwrap();
+        }
     } else {
         println!("Specify a [list of] directories or packages to serve");
         exit(-1)
@@ -68,29 +79,30 @@ async fn async_main(executor: Arc<Executor<'_>>) {
         listing.add(&d).unwrap();
     }
 
-    if listing.map().is_empty() {
+    if listing.id_map().is_empty() {
         println!(
             "Either all files specified are invalid archives or none of the directories contain switch archives!"
         );
         exit(-1)
     }
 
-    println!("\n{} nsps found", listing.map().len());
+    println!("{} nsps found", listing.id_map().len());
 
     let listing = Arc::new(RwLock::new(listing));
 
-    println!("Waiting for device connection...");
+    println!("Waiting for {}", client);
     loop {
-        let tinfoil = loop {
-            match TinfoilDevice::wait_new(listing.clone()).await {
+        let device = loop {
+            match SwitchInterface::wait_new(listing.clone()).await {
                 Ok(device) => break device,
                 Err(e) => println!("Error connecting: {e:?}"),
             }
         };
         println!("Connected!");
+
         executor
-            .spawn(async {
-                if let Err(e) = tinfoil.start_talkin_buddy().await {
+            .spawn(async move {
+                if let Err(e) = client.start_interface(device).await {
                     eprintln!("{e:?} (switch disconnected?)");
                 }
             })

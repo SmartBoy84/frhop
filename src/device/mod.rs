@@ -1,28 +1,42 @@
+pub mod hosts;
 pub mod interface;
-mod packet;
-mod query;
 mod writer;
+// mod hosts;
 
-use std::{
-    io,
-    sync::{Arc, LazyLock},
-};
+use std::{fmt::Display, io, sync::LazyLock};
 
-use nusb::{Device, DeviceId, DeviceInfo, Interface, transfer::TransferError};
+use nusb::{DeviceId, transfer::TransferError};
 use smol::lock::Mutex;
 use thiserror::Error;
 
-use crate::listing::Listing;
+use crate::device::{
+    hosts::{sphaira::SphairaInterface, tinfoil::TinfoilInterface},
+    interface::SwitchInterface,
+};
 
-const DEFAULT_CMD: u32 = 1; // tinfoil only every has 1
 const CHUNK_SIZE: usize = 0x400000; // ~4mb - good chunk size
 const FILE_CACHE_N: usize = 50; // keep n chunk sizes in memory to reduce disk reads
+
+struct HostId {
+    vendor: u16,
+    prod: u16,
+}
+const DEVICES: [HostId; 2] = [
+    HostId {
+        vendor: 0x16C0,
+        prod: 0x27E2,
+    },
+    HostId {
+        vendor: 0x057E,
+        prod: 0x3000,
+    },
+];
 
 // purely an internal variable so not difficult to reason about this
 static CONNECTED_IDS: LazyLock<Mutex<Vec<DeviceId>>> = LazyLock::new(|| Mutex::new(vec![]));
 
 #[derive(Error, Debug)]
-pub enum TinfoilDeviceCommError {
+pub enum SwitchCommError {
     #[error("recv error")]
     RecvError(#[from] TransferError),
     #[error("bad magic id")]
@@ -36,27 +50,59 @@ pub enum TinfoilDeviceCommError {
     PayloadTransferFailed(#[from] io::Error),
 }
 
-struct TinfoilId {
-    vendor: u16,
-    prod: u16,
+#[derive(PartialEq, Clone, Copy)]
+pub enum UsbClient {
+    Tinfoil,
+    Sphaira,
 }
-const DEVICES: [TinfoilId; 2] = [
-    TinfoilId {
-        vendor: 0x16C0,
-        prod: 0x27E2,
-    },
-    TinfoilId {
-        vendor: 0x057E,
-        prod: 0x3000,
-    },
-];
 
-pub struct TinfoilDevice {
-    device: Device,
-    device_info: DeviceInfo,
-    interface: Interface, // tinfoil's interface - there's only one really...
-    in_ep: u8,
-    out_ep: u8,
-    recv_buff: Mutex<Vec<u8>>, // bit of interior mutability
-    listing: Arc<smol::lock::RwLock<Listing>>,
+impl Display for UsbClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Tinfoil => "Tinfoil",
+                Self::Sphaira => "Sphaira",
+            }
+        )
+    }
+}
+
+impl TryFrom<&str> for UsbClient {
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "s" => Self::Sphaira,
+            "t" => Self::Tinfoil,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl Default for UsbClient {
+    fn default() -> Self {
+        Self::Tinfoil
+    }
+}
+
+impl UsbClient {
+    pub async fn start_interface(&self, device: SwitchInterface) -> Result<(), SwitchCommError> {
+        match self {
+            Self::Tinfoil => TinfoilInterface::from(device).start_talkin_buddy().await,
+            Self::Sphaira => SphairaInterface::from(device).start_talkin_buddy().await,
+        }
+    }
+}
+
+trait SwitchHostImpl: From<SwitchInterface> {
+    async fn listen_req(&self) -> Result<(), SwitchCommError>;
+    fn get_interface(&self) -> &SwitchInterface;
+    async fn write_header(&self, n: usize, buff: Vec<u8>) -> Result<Vec<u8>, SwitchCommError>;
+}
+
+#[allow(private_bounds)] // hide SwitchHostImpl methods
+pub trait SwitchHost: SwitchHostImpl + Send {
+    /// loops infinitely; waiting for request and responding accordingly
+    fn start_talkin_buddy(self) -> impl Future<Output = Result<(), SwitchCommError>> + Send;
 }

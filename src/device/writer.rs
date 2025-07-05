@@ -3,52 +3,28 @@ Unsafe *fully localised here
 It's to get performance past what's possible with libusb in python
 */
 
-use std::{
-    io::{Cursor, Read},
-    mem,
-};
+use std::io::{Cursor, Read};
 
-use bytemuck::bytes_of;
-
-use crate::device::{
-    CHUNK_SIZE, DEFAULT_CMD, FILE_CACHE_N, TinfoilDevice, TinfoilDeviceCommError,
-    packet::CommandPacket,
-};
+use crate::device::{CHUNK_SIZE, FILE_CACHE_N, SwitchCommError, SwitchHost};
 
 /*
 Look here to optimise file transfer speeds
 */
 
-impl TinfoilDevice {
-    // these don't need to be hyper-optimised - for file writes, buff taken out at start not on every chunk write
-    pub async fn get_buff(&self) -> Vec<u8> {
-        let mut v = self.recv_buff.lock().await;
-        std::mem::take(&mut *v)
-    }
-
-    pub async fn write_str(
-        &self,
-        res: &str,
-        buff: Vec<u8>,
-    ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+pub trait SwitchHostWriterExt: SwitchHost {
+    async fn write_str(&self, res: &str, buff: Vec<u8>) -> Result<Vec<u8>, SwitchCommError> {
         let b = res.as_bytes();
         self.write_from_reader(b, b.len(), buff).await
     }
 
-    pub async fn return_buff(&self, buff: Vec<u8>) {
-        let mut v = self.recv_buff.lock().await;
-        *v = buff;
-    }
-
     /// transfer n bytes *exactly (err if not) from a reader -> tinfoil
-    pub async fn write_from_reader<R: Read>(
+    async fn write_from_reader<R: Read>(
         &self,
         mut reader: R,
         n: usize,
         mut buff: Vec<u8>,
-    ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    ) -> Result<Vec<u8>, SwitchCommError> {
         buff = self.write_header(n, buff).await?;
-        // buff.resize(n, 0); // highly inefficient - calloc's
 
         buff.reserve(n); // slightly inefficient - sets capacity on top of pre-existing TODO; fix
         unsafe {
@@ -57,43 +33,28 @@ impl TinfoilDevice {
 
         reader.read_exact(&mut buff[..])?;
 
-        self.write(buff).await
+        self.get_interface().write(buff).await
     }
 
     #[allow(unused)]
-    pub async fn write_from_vec<R: Read>(
+    async fn write_from_vec<R: Read>(
         &self,
         payload: Vec<u8>,
         mut buff: Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>), TinfoilDeviceCommError> {
+    ) -> Result<(Vec<u8>, Vec<u8>), SwitchCommError> {
         buff = self.write_header(payload.len(), buff).await?;
-        let payload = self.write(payload).await?;
+        buff = self.get_interface().write(buff).await?;
+        let payload = self.get_interface().write(payload).await?;
         Ok((payload, buff))
     }
 
-    /// copies packet header into buff (can't combine with payload - needs to be separate packet)
-    pub async fn write_header(
-        &self,
-        size: usize,
-        mut buff: Vec<u8>,
-    ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
-        let header = CommandPacket::new(DEFAULT_CMD, size as u64); // slight overhead, but must be done..
-        // fiddle with hardcoding this struct as in struct
-        unsafe {
-            // guarantee; initialised to have least capacity == size_of::<CommandPacket>()
-            buff.set_len(mem::size_of::<CommandPacket>());
-        }
-        buff.copy_from_slice(bytes_of(&header));
-        self.write(buff).await
-    }
-
     #[allow(unused)]
-    pub async fn write_chunked_no_caching<R: Read>(
+    async fn write_chunked_no_caching<R: Read>(
         &self,
         mut reader: R,
         size: u64,
         mut buff: Vec<u8>,
-    ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    ) -> Result<Vec<u8>, SwitchCommError> {
         /* Tried to make this as fast as possible with caching to minimise file reads */
 
         let chunk_n = size / CHUNK_SIZE as u64;
@@ -112,12 +73,12 @@ impl TinfoilDevice {
     }
 
     #[allow(unused)]
-    pub async fn write_chunked_with_caching<R: Read>(
+    async fn write_chunked_with_caching<R: Read>(
         &self,
         mut reader: R,
         size: u64,
         mut buff: Vec<u8>,
-    ) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    ) -> Result<Vec<u8>, SwitchCommError> {
         /* Tried to make this as fast as possible with caching to minimise file reads but doesn't make that big a difference...*/
         let size = (FILE_CACHE_N * CHUNK_SIZE).min(size as usize);
 

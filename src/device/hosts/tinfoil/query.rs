@@ -7,15 +7,20 @@ use std::{
     io::{self, Seek, SeekFrom},
 };
 
+use miniserde::json;
 use thiserror::Error;
 
 use crate::{
-    device::{TinfoilDevice, TinfoilDeviceCommError},
+    device::{
+        SwitchCommError, SwitchHostImpl, hosts::tinfoil::TinfoilInterface,
+        writer::SwitchHostWriterExt,
+    },
     game::entry::GameEntry,
+    listing::ListingIndex,
 };
 
 #[derive(Error, Debug)]
-pub enum QueryErrorKind {
+pub enum TinfoilQueryErrorKind {
     #[error("unsupported cmd: {0}")]
     UnsupportedCmd(String),
     #[error("unsupported endpoint: {0}")]
@@ -33,34 +38,34 @@ pub enum QueryErrorKind {
 }
 
 #[derive(Error, Debug)]
-pub enum QueryError {
+pub enum TinfoilQueryError {
     #[error("bad query: {}", .0.0)]
-    BadQuery((QueryErrorKind, Vec<u8>)),
+    BadQuery((TinfoilQueryErrorKind, Vec<u8>)),
     #[error("{0}")]
-    CommError(#[from] TinfoilDeviceCommError),
+    CommError(#[from] SwitchCommError),
 }
 
-impl QueryErrorKind {
-    fn to_error(self, b: Vec<u8>) -> QueryError {
-        QueryError::BadQuery((self, b))
+impl TinfoilQueryErrorKind {
+    fn to_error(self, b: Vec<u8>) -> TinfoilQueryError {
+        TinfoilQueryError::BadQuery((self, b))
     }
 }
 
 // &str's lifetime is shorter than TinfoilDevice but Query doesn't care about TinfoilDevice longer than it cares about the &str so it works
-pub struct Query<'a> {
+pub struct TinfoilQuery<'a> {
     buff: Vec<u8>,
-    device: &'a TinfoilDevice,
+    device: &'a TinfoilInterface,
     endpoint: &'a str,
     req_type: &'a str,
     query: Option<&'a str>,
 }
 
-impl<'a> Query<'a> {
+impl<'a> TinfoilQuery<'a> {
     pub async fn process_query(
-        device: &'a TinfoilDevice,
+        device: &'a TinfoilInterface,
         buff: Vec<u8>,
         payload: &'a str,
-    ) -> Result<Vec<u8>, QueryError> {
+    ) -> Result<Vec<u8>, TinfoilQueryError> {
         Self::from_payload(device, buff, payload)?
             .handle_query()
             .await
@@ -68,13 +73,13 @@ impl<'a> Query<'a> {
 
     /// buff MUST contain payload at this point
     fn from_payload(
-        device: &'a TinfoilDevice,
+        device: &'a TinfoilInterface,
         buff: Vec<u8>,
         payload: &'a str,
-    ) -> Result<Self, QueryError> {
+    ) -> Result<Self, TinfoilQueryError> {
         let mut args = payload.split('/');
         if args.next() != Some("") {
-            return Err(QueryErrorKind::UnsupportedCmd(payload.to_string()).to_error(buff));
+            return Err(TinfoilQueryErrorKind::UnsupportedCmd(payload.to_string()).to_error(buff));
             // be somewhat strict; tinfoil over usb will always have '/' at start
         }
 
@@ -84,7 +89,7 @@ impl<'a> Query<'a> {
             args.next(),
             args.next(), // may not exist
         ) else {
-            return Err(QueryErrorKind::UnsupportedCmd(payload.to_string()).to_error(buff));
+            return Err(TinfoilQueryErrorKind::UnsupportedCmd(payload.to_string()).to_error(buff));
         };
 
         Ok(Self {
@@ -96,12 +101,12 @@ impl<'a> Query<'a> {
         })
     }
 
-    async fn handle_query(self) -> Result<Vec<u8>, QueryError> {
+    async fn handle_query(self) -> Result<Vec<u8>, TinfoilQueryError> {
         match self.endpoint {
             "api" => self.route_api().await,
             _ => {
                 return Err(
-                    QueryErrorKind::UnsupportedEndpoint(self.endpoint.to_string())
+                    TinfoilQueryErrorKind::UnsupportedEndpoint(self.endpoint.to_string())
                         .to_error(self.buff),
                 );
             }
@@ -109,14 +114,14 @@ impl<'a> Query<'a> {
     }
 }
 
-impl Query<'_> {
-    async fn write_str(self, res: &str) -> Result<Vec<u8>, QueryError> {
+impl TinfoilQuery<'_> {
+    async fn write_str(self, res: &str) -> Result<Vec<u8>, TinfoilQueryError> {
         Ok(self.device.write_str(res, self.buff).await?)
     }
 }
 
-impl Query<'_> {
-    async fn route_api(self) -> Result<Vec<u8>, QueryError> {
+impl TinfoilQuery<'_> {
+    async fn route_api(self) -> Result<Vec<u8>, TinfoilQueryError> {
         println!(
             "API request - req: {}, queries: {:?}",
             self.req_type, self.query
@@ -127,23 +132,23 @@ impl Query<'_> {
             "queue" => self.handle_queue().await,
             "search" => self.handle_search().await,
             "info" => self.handle_info().await,
-            "download" => self.handle_download().await, // because my QueryError also maps from io::Error
-            _ => Err(QueryErrorKind::UnsupportedReqType(self.req_type.to_string()).to_error(self.buff))?,
+            "download" => self.handle_download().await, // because my TinfoilQueryError also maps from io::Error
+            _ => Err(TinfoilQueryErrorKind::UnsupportedReqType(self.req_type.to_string()).to_error(self.buff))?,
         }
     }
 
-    async fn handle_download(self) -> Result<Vec<u8>, QueryError> {
+    async fn handle_download(self) -> Result<Vec<u8>, TinfoilQueryError> {
         let Some(mut args) = self.query.map(|q| q.split('/')) else {
-            return Err(QueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
+            return Err(TinfoilQueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
         };
 
         let Some(t_id) = args.next() else {
-            return Err(QueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
+            return Err(TinfoilQueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
         };
 
-        let listing = self.device.get_listing().await;
-        let Some(game) = listing.get_game(t_id) else {
-            return Err(QueryErrorKind::GameNotFound(t_id.to_string()).to_error(self.buff))?;
+        let listing = self.device.get_interface().get_listing().await;
+        let Some(game) = listing.get_game(ListingIndex::TitleId(t_id)) else {
+            return Err(TinfoilQueryErrorKind::GameNotFound(t_id.to_string()).to_error(self.buff))?;
         };
 
         let mut args = args.map(|v| v.parse::<u64>());
@@ -151,16 +156,16 @@ impl Query<'_> {
             args.next().unwrap_or(Ok(0)),
             args.next().unwrap_or(Ok(game.size())),
         ) else {
-            return Err(QueryErrorKind::BadRange.to_error(self.buff))?;
+            return Err(TinfoilQueryErrorKind::BadRange.to_error(self.buff))?;
         };
 
         let mut f = match File::open(game.path()) {
             Ok(f) => f,
-            Err(e) => return Err(QueryErrorKind::from(e).to_error(self.buff))?,
+            Err(e) => return Err(TinfoilQueryErrorKind::from(e).to_error(self.buff))?,
         };
 
         if let Err(e) = f.seek(SeekFrom::Start(start)) {
-            return Err(QueryErrorKind::from(e).to_error(self.buff))?;
+            return Err(TinfoilQueryErrorKind::from(e).to_error(self.buff))?;
         };
 
         println!("Requested file: {:?}, range {start}-{end}", game.path());
@@ -170,29 +175,46 @@ impl Query<'_> {
             .await?)
     }
 
-    async fn handle_info(self) -> Result<Vec<u8>, QueryError> {
+    async fn handle_info(self) -> Result<Vec<u8>, TinfoilQueryError> {
         let Some(t_id) = self.query.and_then(|q| q.split('/').next()) else {
-            return Err(QueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
+            return Err(TinfoilQueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
         };
 
-        if let Some(game) = self.device.get_listing().await.get_game(t_id) {
+        if let Some(game) = self
+            .device
+            .get_interface()
+            .get_listing()
+            .await
+            .get_game(ListingIndex::TitleId(t_id))
+        {
             let game_entry = match GameEntry::try_from(game) {
                 Ok(g_e) => g_e,
-                Err(e) => return Err(QueryErrorKind::from(e).to_error(self.buff))?,
+                Err(e) => return Err(TinfoilQueryErrorKind::from(e).to_error(self.buff))?,
             };
             self.write_str(&miniserde::json::to_string(&game_entry))
                 .await
         } else {
-            Err(QueryErrorKind::GameNotFound(t_id.to_string()).to_error(self.buff))?
+            Err(TinfoilQueryErrorKind::GameNotFound(t_id.to_string()).to_error(self.buff))?
         }
     }
 
-    async fn handle_search(self) -> Result<Vec<u8>, QueryError> {
-        let s = self.device.get_listing().await.serialise();
+    async fn handle_search(self) -> Result<Vec<u8>, TinfoilQueryError> {
+        // slighly inefficient due to allocation but worth it for the simiplicity in my opinion (im lazy)
+        let s = json::to_string(
+            &self
+                .device
+                .get_interface()
+                .get_listing()
+                .await
+                .id_map()
+                .values()
+                .map(|g| g.game_info())
+                .collect::<Vec<_>>(),
+        );
         self.write_str(&s).await
     }
 
-    async fn handle_queue(self) -> Result<Vec<u8>, QueryError> {
+    async fn handle_queue(self) -> Result<Vec<u8>, TinfoilQueryError> {
         self.write_str("[]").await // another half-baked feature by Blawar
     }
 }

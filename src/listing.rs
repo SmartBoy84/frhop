@@ -1,13 +1,15 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use miniserde::json;
 use smol::io;
 use thiserror::Error;
 
 use crate::game::{Game, GameError};
 
 #[derive(Debug, Default)]
-pub struct Listing(pub HashMap<String, Game>);
+pub struct Listing {
+    id_to_game: HashMap<String, Game>,   // game id -> game
+    file_to_id: HashMap<String, String>, // file name -> id
+}
 
 #[derive(Error, Debug)]
 pub enum ListingError {
@@ -21,6 +23,11 @@ pub enum ListingError {
     GameError(#[from] GameError),
 }
 
+pub enum ListingIndex<'a> {
+    TitleId(&'a str),
+    FileName(&'a str),
+}
+
 impl Listing {
     pub fn new() -> Self {
         Self {
@@ -28,34 +35,39 @@ impl Listing {
         }
     }
 
-    pub fn map(&self) -> &HashMap<String, Game> {
-        &self.0
+    pub fn id_map(&self) -> &HashMap<String, Game> {
+        &self.id_to_game
     }
 
-    pub fn map_mut(&mut self) -> &mut HashMap<String, Game> {
-        &mut self.0
+    pub fn file_map(&self) -> &HashMap<String, String> {
+        &self.file_to_id
     }
 
     fn add_file<P: AsRef<Path>>(&mut self, p: P) -> Result<(), ListingError> {
         let p = p.as_ref();
-        let Some(ext) = p.extension().and_then(|e| e.to_str()) else {
-            return Err(ListingError::BadName);
-        };
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .ok_or(ListingError::BadName)?;
+
+        let p_str = p.to_str().ok_or(ListingError::BadName)?;
 
         if !matches!(ext, "nsp" | "xci" | "nsz" | "nsx") {
             return Err(ListingError::NotArchive);
         }
 
         let game = Game::try_new(p)?;
-        if let Some(g) = self.map_mut().get_mut(game.game_info().title_id())
+        let id = game.game_info().title_id().to_string();
+        if let Some(g) = self.id_to_game.get_mut(&id)
             && g != &game
         {
             println!("Changed; {g:?}");
             *g = game;
         } else {
-            self.map_mut()
+            self.id_to_game
                 .insert(game.game_info().title_id().to_string(), game);
         }
+        self.file_to_id.insert(p_str.to_string(), id);
 
         Ok(())
     }
@@ -109,17 +121,13 @@ impl Listing {
         Ok(())
     }
 
-    pub fn get_game(&self, t_id: &str) -> Option<&Game> {
-        self.map().get(t_id)
-    }
-
-    pub fn serialise(&self) -> String {
-        json::to_string(
-            &self
-                .map()
-                .values()
-                .map(|g| g.game_info())
-                .collect::<Vec<_>>(),
-        )
+    pub fn get_game(&self, index: ListingIndex) -> Option<&Game> {
+        match index {
+            ListingIndex::FileName(f_name) => self
+                .file_map()
+                .get(f_name)
+                .and_then(|id| self.id_map().get(id)),
+            ListingIndex::TitleId(t_id) => self.id_map().get(t_id),
+        }
     }
 }
