@@ -78,14 +78,14 @@ pub async fn get_conn() -> Result<(Device, DeviceInfo), TinfoilDeviceInitError> 
 
 impl TinfoilDevice {
     pub async fn wait_new(listing: Arc<RwLock<Listing>>) -> Result<Self, TinfoilDeviceInitError> {
-        let (device, device_info) = get_conn().await.unwrap();
+        let (device, device_info) = get_conn().await?;
 
         // following not important as tinfoil interface has one config anyways - these aren't supported on windows/WinUSB
         // device.reset()?;
-        // let device = get_conn().await.unwrap();
+        // let device = get_conn().await?;
 
         // tinfoil's usb interface - one config, 2 interfaces but still try to be dynamic...
-        // device.set_configuration(1).unwrap();
+        // device.set_configuration(1)?;
 
         let interface = device.claim_interface(0)?; // why are there 2 interfaces anyways...
 
