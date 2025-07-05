@@ -38,9 +38,6 @@ impl Listing {
 
     fn add_file<P: AsRef<Path>>(&mut self, p: P) -> Result<(), ListingError> {
         let p = p.as_ref();
-        if p.starts_with(".") {
-            return Err(ListingError::NotArchive); // immediately exclude hidden directories
-        }
         let Some(ext) = p.extension().and_then(|e| e.to_str()) else {
             return Err(ListingError::BadName);
         };
@@ -67,7 +64,7 @@ impl Listing {
     fn add_file_nonfatal<P: AsRef<Path>>(&mut self, p: P) -> io::Result<()> {
         match self.add_file(&p) {
             Err(ListingError::IoError(e)) => return Err(e),
-            Ok(_) | Err(ListingError::NotArchive) => (), // ignore this error so user isn't bombarded with errors
+            Ok(_) | Err(ListingError::NotArchive | ListingError::BadName) => (), // ignore this error so user isn't bombarded with errors
             Err(e) => {
                 let p = p.as_ref();
                 println!("Failed to add {p:?}: {e:?}")

@@ -70,7 +70,7 @@ async fn async_main(executor: Arc<Executor<'_>>) {
 
     if listing.map().is_empty() {
         println!(
-            "Either all files specified are invalid packages or all of the directories are empty!"
+            "Either all files specified are invalid archives or none of the directories contain switch archives!"
         );
         exit(-1)
     }
