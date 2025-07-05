@@ -3,7 +3,10 @@ Unsafe *fully localised here
 It's to get performance past what's possible with libusb in python
 */
 
-use std::{io::{Cursor, Read}, mem};
+use std::{
+    io::{Cursor, Read},
+    mem,
+};
 
 use bytemuck::bytes_of;
 
@@ -21,6 +24,11 @@ impl TinfoilDevice {
     pub async fn get_buff(&self) -> Vec<u8> {
         let mut v = self.recv_buff.lock().await;
         std::mem::take(&mut *v)
+    }
+
+    pub async fn write_str(&self, res: &str, buff: Vec<u8>) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+        let b = res.as_bytes();
+        self.write_from_reader(b, b.len(), buff).await
     }
 
     pub async fn return_buff(&self, buff: Vec<u8>) {

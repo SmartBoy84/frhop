@@ -32,8 +32,6 @@ pub enum TinfoilDeviceCommError {
     #[error("bad utf-8 in cmd")]
     CorruptedCmd,
     // following should be non-fatal
-    #[error("bad query")]
-    BadQuery(#[from] QueryError),
     #[error("payload r/w failed")]
     PayloadTransferFailed(#[from] io::Error),
 }

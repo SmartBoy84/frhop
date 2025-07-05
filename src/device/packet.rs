@@ -15,6 +15,20 @@ pub struct CommandPacket {
     timestamp: u64,
 }
 
+#[derive(miniserde::Serialize, Debug)]
+pub struct StatusResponse {
+    #[serde(rename = "success")]
+    success: bool,
+    #[serde(rename = "message")]
+    message: String,
+}
+
+impl StatusResponse {
+    pub fn new(success: bool, message: String) -> Self {
+        Self { success, message }
+    }
+}
+
 impl CommandPacket {
     /// from_bytes panics for size-mismatch but not possible to call this function without a buffer of right size
     /// None if magic header mismatch

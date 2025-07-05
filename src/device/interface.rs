@@ -1,5 +1,6 @@
 use std::{io, mem, sync::Arc};
 
+use miniserde::json;
 use nusb::{
     Device, DeviceInfo,
     hotplug::HotplugEvent,
@@ -11,9 +12,14 @@ use smol::{
 };
 use thiserror::Error;
 
-use crate::{device::{
-    packet::CommandPacket, query::Query, TinfoilDevice, TinfoilDeviceCommError, CONNECTED_IDS, DEFAULT_CMD, DEVICES
-}, listing::Listing};
+use crate::{
+    device::{
+        CONNECTED_IDS, DEFAULT_CMD, DEVICES, TinfoilDevice, TinfoilDeviceCommError,
+        packet::{CommandPacket, StatusResponse},
+        query::{Query, QueryError},
+    },
+    listing::Listing,
+};
 
 #[derive(Error, Debug)]
 pub enum TinfoilDeviceInitError {
@@ -167,11 +173,20 @@ impl TinfoilDevice {
             .to_string(); // must copy since Query will be writing to recv_buff 
 
         // handle and respond to query
-        let query = Query::from_payload(self, recv_buff, &payload)?;
-        recv_buff = query.handle_query().await?; // all single-threaded baby! read mod.rs
-
-        self.return_buff(recv_buff).await; // place back the Vec
+        let b = match Query::process_query(self, recv_buff, &payload).await {
+            Ok(b) => b,
+            Err(QueryError::CommError(comm_e)) => return Err(comm_e),
+            Err(QueryError::BadQuery((bq_e, b))) => {
+                // query erorrs are non-fatal by design
+                let e = bq_e.to_string();
+                println!("Query error; {}", &e);
+                self.write_str(&json::to_string(&StatusResponse::new(false, e)), b)
+                    .await?
+            }
+        };
+        self.return_buff(b).await;
         Ok(())
+        // all single-threaded baby! read mod.rs
     }
 
     /// loops infinitely; waiting for request and responding accordingly
@@ -179,7 +194,7 @@ impl TinfoilDevice {
         // println!("Hey twitcho! Waiting for requests...");
         // man this is so nice! tinfoil comms are ping-pong style (i.e., no continuation - request then response, repeat)
         loop {
-            self.listen_req().await?;
+            self.listen_req().await?; // fail on TinfoilDeviceCommErorr - that's why I consume it, after this function errs, struct is in undefined state (no buff Vec)
         }
     }
 }

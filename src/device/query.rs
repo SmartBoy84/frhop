@@ -4,7 +4,7 @@ info, queue, search, download
 
 use std::{
     fs::File,
-    io::{Seek, SeekFrom},
+    io::{self, Seek, SeekFrom},
 };
 
 use thiserror::Error;
@@ -15,7 +15,7 @@ use crate::{
 };
 
 #[derive(Error, Debug)]
-pub enum QueryError {
+pub enum QueryErrorKind {
     #[error("malformed cmd")]
     UnsupportedCmd(String),
     #[error("unsupported endpoint")]
@@ -28,8 +28,22 @@ pub enum QueryError {
     GameNotFound(String),
     #[error("bad download range")]
     BadRange,
-    #[error("io error")]
-    IoError(#[from] smol::io::Error),
+    #[error("failed to read file")]
+    FileRead(#[from] io::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum QueryError {
+    #[error("bad query")]
+    BadQuery((QueryErrorKind, Vec<u8>)),
+    #[error("tinfoil comm erorr")]
+    CommError(#[from] TinfoilDeviceCommError),
+}
+
+impl QueryErrorKind {
+    fn to_error(self, b: Vec<u8>) -> QueryError {
+        QueryError::BadQuery((self, b))
+    }
 }
 
 // &str's lifetime is shorter than TinfoilDevice but Query doesn't care about TinfoilDevice longer than it cares about the &str so it works
@@ -42,15 +56,25 @@ pub struct Query<'a> {
 }
 
 impl<'a> Query<'a> {
+    pub async fn process_query(
+        device: &'a TinfoilDevice,
+        buff: Vec<u8>,
+        payload: &'a str,
+    ) -> Result<Vec<u8>, QueryError> {
+        Self::from_payload(device, buff, payload)?
+            .handle_query()
+            .await
+    }
+
     /// buff MUST contain payload at this point
-    pub fn from_payload(
+    fn from_payload(
         device: &'a TinfoilDevice,
         buff: Vec<u8>,
         payload: &'a str,
     ) -> Result<Self, QueryError> {
         let mut args = payload.split('/');
         if args.next() != Some("") {
-            return Err(QueryError::UnsupportedCmd(payload.to_string()).into());
+            return Err(QueryErrorKind::UnsupportedCmd(payload.to_string()).to_error(buff));
             // be somewhat strict; tinfoil over usb will always have '/' at start
         }
 
@@ -60,7 +84,7 @@ impl<'a> Query<'a> {
             args.next(),
             args.next(), // may not exist
         ) else {
-            return Err(QueryError::UnsupportedCmd(payload.to_string()).into());
+            return Err(QueryErrorKind::UnsupportedCmd(payload.to_string()).to_error(buff));
         };
 
         Ok(Self {
@@ -72,28 +96,27 @@ impl<'a> Query<'a> {
         })
     }
 
-    pub async fn handle_query(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    async fn handle_query(self) -> Result<Vec<u8>, QueryError> {
         match self.endpoint {
             "api" => self.route_api().await,
-            _ => return Err(QueryError::UnsupportedEndpoint(self.endpoint.to_string()).into()),
+            _ => {
+                return Err(
+                    QueryErrorKind::UnsupportedEndpoint(self.endpoint.to_string())
+                        .to_error(self.buff),
+                );
+            }
         }
     }
 }
 
 impl Query<'_> {
-    async fn write_str(self, res: &str) -> Result<Vec<u8>, TinfoilDeviceCommError> {
-        let b = res.as_bytes();
-        self.device.write_from_reader(b, b.len(), self.buff).await
-    }
-
-    #[inline] // tho compiler will prob already inline it
-    fn map_io(e: smol::io::Error) -> QueryError {
-        QueryError::IoError(e)
+    async fn write_str(self, res: &str) -> Result<Vec<u8>, QueryError> {
+        Ok(self.device.write_str(res, self.buff).await?)
     }
 }
 
 impl Query<'_> {
-    async fn route_api(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    async fn route_api(self) -> Result<Vec<u8>, QueryError> {
         println!(
             "API request - req: {}, queries: {:?}",
             self.req_type, self.query
@@ -105,22 +128,22 @@ impl Query<'_> {
             "search" => self.handle_search().await,
             "info" => self.handle_info().await,
             "download" => self.handle_download().await, // because my QueryError also maps from io::Error
-            _ => Err(QueryError::UnsupportedReqType(self.req_type.to_string()).into()),
+            _ => Err(QueryErrorKind::UnsupportedReqType(self.req_type.to_string()).to_error(self.buff))?,
         }
     }
 
-    async fn handle_download(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    async fn handle_download(self) -> Result<Vec<u8>, QueryError> {
         let Some(mut args) = self.query.map(|q| q.split('/')) else {
-            return Err(QueryError::NoIdInfoQuery)?;
+            return Err(QueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
         };
 
         let Some(t_id) = args.next() else {
-            return Err(QueryError::NoIdInfoQuery)?;
+            return Err(QueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
         };
 
         let listing = self.device.get_listing().await;
         let Some(game) = listing.get_game(t_id) else {
-            return Err(QueryError::GameNotFound(t_id.to_string()))?;
+            return Err(QueryErrorKind::GameNotFound(t_id.to_string()).to_error(self.buff))?;
         };
 
         let mut args = args.map(|v| v.parse::<u64>());
@@ -128,40 +151,48 @@ impl Query<'_> {
             args.next().unwrap_or(Ok(0)),
             args.next().unwrap_or(Ok(game.size())),
         ) else {
-            return Err(QueryError::BadRange)?;
+            return Err(QueryErrorKind::BadRange.to_error(self.buff))?;
         };
 
-        let mut f = File::open(game.path()).map_err(Self::map_io)?;
+        let mut f = match File::open(game.path()) {
+            Ok(f) => f,
+            Err(e) => return Err(QueryErrorKind::from(e).to_error(self.buff))?,
+        };
 
-        f.seek(SeekFrom::Start(start))
-            .map_err(Self::map_io)
-            .unwrap();
+        if let Err(e) = f.seek(SeekFrom::Start(start)) {
+            return Err(QueryErrorKind::from(e).to_error(self.buff))?;
+        };
 
         println!("Requested file: {:?}, range {start}-{end}", game.path());
-        self.device
+        Ok(self
+            .device
             .write_chunked_with_caching(f, end - start, self.buff)
-            .await
+            .await?)
     }
 
-    async fn handle_info(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    async fn handle_info(self) -> Result<Vec<u8>, QueryError> {
         let Some(t_id) = self.query.and_then(|q| q.split('/').next()) else {
-            return Err(QueryError::NoIdInfoQuery)?;
+            return Err(QueryErrorKind::NoIdInfoQuery.to_error(self.buff))?;
         };
 
         if let Some(game) = self.device.get_listing().await.get_game(t_id) {
-            self.write_str(&miniserde::json::to_string(&GameEntry::try_from(game)?))
+            let game_entry = match GameEntry::try_from(game) {
+                Ok(g_e) => g_e,
+                Err(e) => return Err(QueryErrorKind::from(e).to_error(self.buff))?,
+            };
+            self.write_str(&miniserde::json::to_string(&game_entry))
                 .await
         } else {
-            Err(QueryError::GameNotFound(t_id.to_string()))?
+            Err(QueryErrorKind::GameNotFound(t_id.to_string()).to_error(self.buff))?
         }
     }
 
-    async fn handle_search(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    async fn handle_search(self) -> Result<Vec<u8>, QueryError> {
         let s = self.device.get_listing().await.serialise();
         self.write_str(&s).await
     }
 
-    async fn handle_queue(self) -> Result<Vec<u8>, TinfoilDeviceCommError> {
+    async fn handle_queue(self) -> Result<Vec<u8>, QueryError> {
         self.write_str("[]").await // another half-baked feature by Blawar
     }
 }
