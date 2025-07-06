@@ -14,8 +14,12 @@ use crate::device::{
     interface::SwitchInterface,
 };
 
-const CHUNK_SIZE: usize = 0x400000; // ~4mb - good chunk size
+const CHUNK_SIZE: u64 = 0x400000; // ~4mb - good chunk size
 const FILE_CACHE_N: usize = 50; // keep n chunk sizes in memory to reduce disk reads
+
+// TX/RX
+const TX_BUFF_N: usize = CHUNK_SIZE as usize;
+const RX_BUFF_N: usize = 100; // 100 bytes more than sufficient I'd say
 
 struct HostId {
     vendor: u16,
@@ -45,9 +49,9 @@ pub enum SwitchCommError {
     UnknownCmd, // tinfoil only has command == 1
     #[error("bad utf-8 in cmd")]
     CorruptedCmd,
-    // following should be non-fatal
+    // following should be fatal
     #[error("payload r/w failed")]
-    PayloadTransferFailed(#[from] io::Error),
+    SwitchRw(#[from] io::Error),
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -96,9 +100,9 @@ impl UsbClient {
 }
 
 trait SwitchHostImpl: From<SwitchInterface> {
-    async fn listen_req(&self) -> Result<(), SwitchCommError>;
+    async fn listen_response(&mut self) -> Result<(), SwitchCommError>;
+    fn get_interface_mut(&mut self) -> &mut SwitchInterface;
     fn get_interface(&self) -> &SwitchInterface;
-    async fn write_header(&self, n: usize, buff: Vec<u8>) -> Result<Vec<u8>, SwitchCommError>;
 }
 
 #[allow(private_bounds)] // hide SwitchHostImpl methods

@@ -16,7 +16,7 @@ ctrlc = "3.4.7"
 futures-io = "0.3.31"
 miniserde = "0.1.42"
 notify = "8.1.0"
-nusb = "0.1.14"
+nusb = { version = "0.2.0-beta.2", features = ["smol"] }
 smol = "2.0.2"
 thiserror = "2.0.12"
 
