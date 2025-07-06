@@ -14,7 +14,7 @@ use crate::device::{
     interface::SwitchInterface,
 };
 
-const CHUNK_SIZE: u64 = 0x400000; // ~4mb - good chunk size
+const CHUNK_SIZE: u64 = 0x800000; // ~4mb - good chunk size
 const FILE_CACHE_N: usize = 50; // keep n chunk sizes in memory to reduce disk reads
 
 // TX/RX
@@ -100,7 +100,6 @@ impl UsbClient {
 }
 
 trait SwitchHostImpl: From<SwitchInterface> {
-    async fn listen_response(&mut self) -> Result<(), SwitchCommError>;
     fn get_interface_mut(&mut self) -> &mut SwitchInterface;
     fn get_interface(&self) -> &SwitchInterface;
 }

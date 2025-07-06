@@ -2,7 +2,6 @@ use std::{io::Write, mem};
 
 use smol::io::AsyncReadExt;
 
-use bytemuck::bytes_of;
 use miniserde::json;
 
 use crate::device::{
@@ -40,7 +39,9 @@ impl SwitchHostImpl for TinfoilInterface {
     fn get_interface(&self) -> &SwitchInterface {
         &self.inner
     }
+}
 
+impl TinfoilInterface {
     // listens and responds to requests
     async fn listen_response(&mut self) -> Result<(), SwitchCommError> {
         let interface = self.get_interface_mut();
